@@ -2,6 +2,7 @@
 Labs for each containers workshop session can be found in this repo
 
 ## Getting started
+### Clone Repo
 1. Open a terminal/shell
 2. Clone this repository with the command below, alternative download the [ZIP here](https://github.com/kordaralabs/free-containers-workshop/archive/refs/heads/main.zip)
     
