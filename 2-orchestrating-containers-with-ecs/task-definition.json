@@ -7,7 +7,7 @@
         }
     ],
     "family": "flask-app",
-    "executionRoleArn": "arn:aws:iam::263403595205:role/ecsTaskExecutionRole",
+    "executionRoleArn": "<ECS Task Execution Role ARN here>",
     "networkMode": "awsvpc",
     "requiresCompatibilities": [
         "EC2",
