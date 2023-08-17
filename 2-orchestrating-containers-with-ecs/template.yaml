@@ -1,0 +1,156 @@
+Resources:
+  EcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: default
+
+  FlaskAppRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: flask-app
+
+  DemoVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: '10.0.0.0/16'
+  
+  PublicSubnetUSWest1a:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DemoVPC
+      CidrBlock: '10.0.1.0/24'
+      AvailabilityZone: us-west-1a
+
+  PublicSubnetUSWest1c:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DemoVPC
+      CidrBlock: '10.0.2.0/24'
+      AvailabilityZone: us-west-1c
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref DemoVPC
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetUSWest1aRTAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetUSWest1a
+
+  PublicSubnetUSWest1cRTAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetUSWest1c
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref DemoVPC
+
+  AllowHTTPSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP traffic to the host
+      VpcId: !Ref DemoVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+
+  ECSTaskExecRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  ECSLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: flask-app
+      Scheme: internet-facing
+      Subnets:
+        - !Ref PublicSubnetUSWest1a
+        - !Ref PublicSubnetUSWest1c
+      SecurityGroups:
+        - !Ref AllowHTTPSecurityGroup
+
+  HTTPListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref FlaskAppTargetGroup
+      LoadBalancerArn: !Ref ECSLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  FlaskAppTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:      
+      Name: FlaskAppTargetGroup
+      Port: 8080
+      Protocol: HTTP
+      VpcId: !Ref DemoVPC
+      TargetType: ip
+      
+Outputs:
+  VpcID:
+    Value: !GetAtt DemoVPC.VpcId
+    Export:
+      Name: VpdId
+  SubnetUSWest1a:
+    Value: !GetAtt PublicSubnetUSWest1a.SubnetId
+    Export:
+      Name: SubnetUSWest1a
+  SubnetUSWest1c:
+    Value: !GetAtt PublicSubnetUSWest1c.SubnetId
+    Export:
+      Name: SubnetUSWest1c
+  AllowHTTPSG:
+    Value: !GetAtt AllowHTTPSecurityGroup.GroupId
+    Export:
+      Name: AllowHTTPSG
+  TaskExecutionRoleArn:
+    Value: !GetAtt ECSTaskExecRole.Arn
+    Export:
+      Name: TaskExecRoleArn
+  FlaskAppRepository:
+    Value: !GetAtt FlaskAppRepository.RepositoryUri
+    Export:
+      Name: FlaskRepoUri
+  LoadBalancerDNSName:
+    Value: !GetAtt ECSLoadBalancer.DNSName
+    Export:
+      Name: LbDnsName
+  TargetGroupARN:
+    Value: !GetAtt FlaskAppTargetGroup.TargetGroupArn
+    Export:
+      Name: TgARN

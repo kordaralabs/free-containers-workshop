@@ -2,8 +2,13 @@
     "containerDefinitions": [
         {
             "name": "flask-app",
-            "image": "kordaraworkshops/flask-app:dev",
-            "essential": true
+            "image": "<ACCOUNT ID>.dkr.ecr.us-west-1.amazonaws.com/flask-app",
+            "essential": true,
+            "portMappings": [
+                {
+                  "containerPort": 8080
+                }
+            ]
         }
     ],
     "family": "flask-app",

@@ -5,189 +5,166 @@ This lab walks you through
 - creating a standalone ECS Task
 - creating a highly available ECS Task
 
-## 0 - Clone Repo
-1. Open a terminal
-2. Clone the workshop repository with the command below
+## 0 - Open AWS CloudShell
+- Follow the [instructions here](https://docs.aws.amazon.com/cloudshell/latest/userguide/welcome.html) to open AWS CloudShell. Using CloudSheel will prevent working with AWS Access Keys.
+
+## 1 - Clone Repo
+1. In AWS CloudShell, clone the workshop repository with the command below
   
-    `git clone https://github.com/kordaralabs/free-containers-workshop.git`
+    ```
+    git clone https://github.com/kordaralabs/free-containers-workshop.git
+    cd free-containers-workshop
+    ```
     
-    Alternatively, download the [ZIP here](https://github.com/kordaralabs/free-containers-workshop/archive/refs/heads/main.zip) if you don't have git installed. Then, navigate to the directory of the unzipped file in the terminal
-    
-3. Change directory to `2-orchestrating-containers-with-ecs`
+2. Change directory to `2-orchestrating-containers-with-ecs`
 
     `cd 2-orchestrating-containers-with-ecs`
 
-## 1 - Dependencies
-### 1.1 - Install AWS CLI
-Follow instructions here to install the AWS CLI
+## 2 - Setup AWS Infrastructure for ECS
+### 2.1 - Create CloudFormation Stack
+Use CloudFormation to setup the ECS Cluster, ECR repository, VPC, Subnets, Security Groups, Load Balancer and EC2 instance for the ECS Cluster. It will take a couple of minutes for the resources to be created.
 
-### 1.2 - Setup AWS User for the CLI or User CloudShell
+`aws cloudformation create-stack --stack-name infra --template-body file://template.yaml --capabilities CAPABILITY_NAMED_IAM --region us-west-1`
 
-## 2 - Setup an Image Respository
-### - DockerHub
-1. Sign up for Dockerhub: [Dockerhub](https://hub.docker.com/)
-  
-2. Create a `flask-app` repository using [this guide](https://docs.docker.com/docker-hub/repos/create/#create-a-repository)
+### 2.2 - Get all Ids, resource names and ARNs of resources created by CloudFormation
+This command will be used multiple times in this guide. The output can be copied to a temporary file for reference, if you do not want to run it multiple times. 
 
-## 3 - Push Image to DockerHub
-[This documentation](https://docs.docker.com/docker-hub/repos/create/#push-a-docker-container-image-to-docker-hub) walks through the process
+`aws cloudformation list-exports --query 'Exports[*].[Name,Value]' --output table`
 
-### 3.1 - Login to DockerHub
-Login to Docker Hub on the docker cli. Run the commansd below to login to docker
 
-  - `docker login` - then enter your username and password
+Optional: Open the `infra` Stack in [CloudFormation](https://us-west-1.console.aws.amazon.com/cloudformation/home?region=us-west-1#/stacks/) to see the resources.
 
-### 3.2 - Push image to the repository
-Images need to have the repository URL prefixed before it can be pushed
+## 3 - Push Image to ECR 
+Get the ID of your AWS Account for use in the subsequent commands with `<ACCOUNT ID>` placeholder
 
-1. Tag the `flask-repo` image with the repository information
-   - `IMAGE_NAME=<hub-user>/flask-repo:dev`
-   - `docker tag $IMAGE_NAME`
+  `aws sts get-caller-identity --query Account --output text`
 
-2. Push the image 
+### 3.1 - Login to ECR on Local Terminal
+AWS CloudShell does not currently support Docker, so the container images cannot be built or pushed from it. The image will have to be pushed from your local computer/workstation.
 
-  `docker push $IMAGE_NAME`
+- `CLOUDSHELL`: Run the AWS command below in CloudShell to get the credentials for the ECR respository
 
-## 4 - Open AWS CloudShell and Pull Repository
-- [Follow instructions here](https://docs.aws.amazon.com/cloudshell/latest/userguide/welcome.html#how-to-get-started) to open a CloudShell
-- Run commands below to clone the repositor and chnage to the directory for the lab
-  ```
-  git clone https://github.com/kordaralabs/free-containers-workshop.git
-  cd free-containers-workshop/2-orchestrating-containers-with-ecs
-  ```
+  `aws ecr get-login-password --region us-west-1`
 
-## 5 - Setup Dependencies for ECS
-### 5.1 - Create ECS Task Execution Role
-Task Execution role allows ECS to make AWS API calls needed to setup the tasks. See more about [it here](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task_execution_IAM_role.html). 
+- `LOCAL COMPUTER/WORKSTATION`: Open a terminal on your local workstation, and login with the credentials returned from the previous command. When asked for `password`, copy and paste the credentials from CloudShell. Ensure to replace `<ACCOUNT ID>` with the AWS Account ID.
 
-- Create the role
-  ```
-  aws iam create-role \
-  --role-name ecsTaskExecutionRole \
-  --assume-role-policy-document file://ecs-tasks-trust-policy.json
-  ```
+  `docker login --username AWS <ACCOUNT ID>.dkr.ecr.us-west-1.amazonaws.com`
 
-- Attach relevant permissions to the role 
-  ```
-  aws iam attach-role-policy \
-  --role-name ecsTaskExecutionRole \
-  --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-  ```
+  Alternatively, use the command below that specifies the credentials as part of the argument instead of the hidden prompt.
 
-### 5.2 - Create ECS Task Definition
+  `docker login --username AWS <ACCOUNT ID>.dkr.ecr.us-west-1.amazonaws.com --password <ECR credentials from CloudShell>`
+
+### 3.2 - Change image name
+The command below gives an alternative name to the `flask-app` container image.
+
+`docker tag flask-app <ACCOUNT ID>.dkr.ecr.us-west-1.amazonaws.com/flask-app`
+
+### 3.3 - Push image to the repository
+Push the image to the ECR repository
+
+`docker push <ACCOUNT ID>.dkr.ecr.us-west-1.amazonaws.com/flask-app`
+
+## 4 - Create ECS Task Definition
 Task Definition is a template for ECS to run tasks with. 
 
-- Open the `task-definition.json` file and set the Task Execution Role on `Line 10` to the Task ARN in step `5.1`
-
-- The Task Execution Role created in section `5.1` is referenced in the `JSON` file. Ensure that the ARN is correct.
-  `aws ecs register-task-definition --cli-input-json file://task-definition.json`
-
-### 5.3 - Grab Subnet IDs to use
-
-- List all VPCs in the region
-  `aws ec2 describe-vpcs --query 'Vpcs[*].[VpcId,CidrBlock,IsDefault]' --output table`
-
-- Set VPC_ID variable so it can be used later
-  `VPC_ID=<VPC ID>`
-
-- Grab Subnet IDs using the VPC ID as a filter
-  ```
-  aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" \
-  --query 'Subnets[*].[SubnetId,CidrBlock,AvailabilityZone,VpcId]' --output table
-  ```
-
-- Set Subnet ID Variables from output of previous command for future use
-  `SUBNET_1=<Subnet ID>`
-  `SUBNET_2=<Another Subnet ID>`
-
-### 5.4 - Setup Security Groups
-
-- Create a new Security Group for use with ECS and Load Balancers, then store the in SG_ID for future use
-  ```
-  SG_ID=$(aws ec2 create-security-group --group-name allow-http \
-  --description "Allow HTTP port 80" --vpc-id $VPC_ID \
-  --query 'GroupId' --output text) && echo $SG_ID
-  ```
-
-- Allow HTTP Port 80 on the Security Group
-  `aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port 80 --cidr 0.0.0.0/0`
-
-### 5.5 - Create `default` ECS cluster
-
-  `aws ecs create-cluster --cluster-name default`
-
-## 6 - Create Standalone Task and test it
-- Create a standalone ECS Task using the command below
+### 4.1 - Replace placeholders in the `task-definition.json` file
+- Replace `<ACCOUNT ID>` with the actual `Account ID` from Step `3`
 
   ```
-  TASK_ARN=$(aws ecs run-task --cluster default --task-definition flask-app:1 \
-  --awsvpcConfiguration={subnets=[$SUBNET_1,$SUBNET_1],securityGroups=[$SG_ID],assignPublicIp=ENABLED} \
+  ...
+  "name": "flask-app",
+  "image": "<ACCOUNT ID>.dkr.ecr.us-west-1.amazonaws.com/flask-app", <------------------ here
+  "essential": true
+  ...
+  ```       
+
+- Set the Task Execution Role ARN to the value of `TaskExecRoleArn` from Step `2.2`
+
+  ```
+  ...
+  "family": "flask-app",
+  "executionRoleArn": "arn:aws:iam::<ACCOUNT ID>:role/<Role Name>",   <------------------ here
+  "networkMode": "awsvpc",
+  ...
+  ```
+
+### 4.2 - Create Task Definition
+- Create the Task Definition and store the ARN for steps `5` and `6` 
+  
+  ```
+  TD_ARN=$(aws ecs register-task-definition --cli-input-json file://task-definition.json \
+    --query 'taskDefinition.taskDefinitionArn' --output text) && echo $TD_ARN
+  ```
+
+## 5 - Create Standalone Task and test it
+Subnet Ids, Security Group Id and the Task Definition ARN are needed to create the standalone ECS Task. 
+
+### 5.1 - Set required variables
+The Task Definition ARN (`TD_ARN`) has already been set in step `4.2`. However, other variables need to set from the table in step `2.2`
+
+ `SG_ID=<Set to value of AllowHTTPSG>`
+
+ `SUBNET_1=<Set to value of SubnetUSWest1a>`
+
+ `SUBNET_2=<Set to value of SubnetUSWest1c>`
+
+### 5.2 - Create standalone Task
+Create the Task with the command below and store the `TASK_ARN` for later use
+
+  ```
+  TASK_ARN=$(aws ecs run-task --cluster default --task-definition $TD_ARN --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_1,$SUBNET_1],securityGroups=[$SG_ID],assignPublicIp=ENABLED}" \
   --query 'tasks[0].taskArn' --output text) && echo $TASK_ARN
   ```
 
+### 5.3 - Test the standalone Task
 - Test the task in a browser by visiting its public IP
+
   ```
-  aws ecs describe-tasks --cluster default --tasks $TASK_ARN \
-  --query 'tasks[0].attachments[0].details[?name==`publicIPv4Address`].value' --output text 
+  NETWORK_INTERFACE_ID=$(aws ecs describe-tasks --cluster default --tasks $TASK_ARN --query 'tasks[0].attachments[0].details[?name==`networkInterfaceId`].value' --output text)
+  PUBLIC_IP=$(aws ec2 describe-network-interfaces --network-interface-ids $NETWORK_INTERFACE_ID --query 'NetworkInterfaces[0].Association.PublicIp' --output text) && echo $PUBLIC_IP
   ```
 
-- Delete the Standalone ECS Task
-  `aws ecs stop-task --cluster default --task $TASK_ID`
+- Visit the public IP of the Task on port 8080 that the application runs on `<Public IP>:8080` or use curl like in the example below
 
-## 7 - Create Highly Available Service
-### 7.1 - Setup an Application Load Balancer
-Steps to create an Application Load Balancer [with the CLI](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/tutorial-application-load-balancer-cli.html#create-load-balancer-aws-cli)
+  `curl $PUBLIC_IP:8080`
 
-- Create a Target Group and store the ARN in `TG_ARN`
-  ```
-  TG_ARN=$(aws elbv2 create-target-group --name flask-app-TG \
-  --protocol HTTP --port 80 --vpc-id $VPC_ID \
-  --query 'TargetGroups[0].TargetGroupArn' --output text) && echo $TG_ARN
-  ```
+### 5.4 - Stop standalone Task
+Delete the Standalone ECS Task
+ 
+`aws ecs stop-task --cluster default --task $TASK_ARN`
 
-- Create an Application Load Balancer and store the ARN in `LB_ARN`
-  ```
-  LB_ARN=$(aws elbv2 create-load-balancer --name flask-app-LB \
-  --subnets $SUBNET_1 $SUBNET_1 --security-groups $SG_ID \
-  --query 'LoadBalancers[0].LoadBalancerArn' --output text) && echo $LB_ARN
-  ```
+## 6 - Create Highly Available Service using ECS Service and Load Balancers
+### 6.1 - Set required variables
+Set the Target Group ARN in a variable. The Target Group ARN is needed to setup to a Load Balancer for the ECS Service.
 
-- Create a Listener for port 80 and let it forward to the Target Group, then store the Listener ARN in `LST_ARN`
-  ```
-  LST_ARN=$(aws elbv2 create-listener --protocol HTTP --port 80 \
-  --load-balancer-arn $LB_ARN --default-actions Type=forward,TargetGroupArn=$TG_ARN \
-  --query 'Listeners[0].ListenerArn' --output text) && echo $LST_ARN
-  ```
-### 6.2 - Create ECS Service
-- Create ECS Service using previously created Load Balancer
+`TG_ARN=<Set to value of TgARN>`
+
+### 6.2 - Create the ECS Service
+Create ECS Service using previously created Load Balancer
 
   ```
   aws ecs create-service --service-name flask-app-service --cluster default \
-  --task-definition my-task-definition \
-  --load-balancers targetGroupArn=$TG_ARN,containerName="flask-app",containerPort=80
+  --task-definition $TD_ARN --desired-count 2 --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_1,$SUBNET_1],securityGroups=[$SG_ID],assignPublicIp=ENABLED}" \
+  --load-balancers targetGroupArn=$TG_ARN,containerName="flask-app",containerPort=8080
   ```
-
-- Test the highly available application by visiting the Load Balancer URL in a browser
-  `aws elbv2 describe-load-balancers --load-balancer-arns $LB_ARN --query 'LoadBalancers[0].DNSName' --output text`
+  
+### 6.3 - Test ECS Service 
+Test the ECS Service by visiting the Load Balancer URL in a browser. The URL is the value of `LbDnsName` from the table in Step `2.2`
 
 ## 7 - Cleanup
 - Delete the ECS Service. `--force` allows deleting a service without scaling the tasks to 0
   `aws ecs delete-service --cluster default --service flask-app-service --force`
 
-- Delete the Load Balancer
-  `aws elbv2 delete-load-balancer --load-balancer-arn $LB_ARN`
-
-- Delete Load Balancer Listener
-  `aws elbv2 delete-listener --listener-arn $LST_ARN`
-
-- Delete the Load Balancer Target Group
-
-  `aws elbv2 delete-target-group --target-group-arn $TG_ARN`
+- Delete Images in the ECR repository
+  
+  `aws ecr delete-repository --repository-name flask-app --force`
 
 - Deregister and delete each Task Definition revision
   - List all revisions
   
-    `aws ecs list-task-definition-families --family-prefix flask-app --query 'families[].revision' --output table`
+    `aws ecs list-task-definitions --family-prefix flask-app`
 
   - Deregister each revision number, replace `<revision number>` with the Task Definition revision number
   
@@ -196,15 +173,15 @@ Steps to create an Application Load Balancer [with the CLI](https://docs.aws.ama
   - Delete the Task Defintion revision, replace `<revision number>` with the Task Definition revision number
   
     `aws ecs delete-task-definitions --task-definition flask-app:<revision number>`
+ 
+- Delete CloudFormation stack
 
-- Delete the Security Group
+  `aws cloudformation delete-stack --stack-name infra`
 
-  `aws ec2 delete-security-group --group-id $SG_ID`
+  Wait for a couple of minutes and then use the command below to verify if the Cloudformation stcak has been deleted succesfully
 
-- Delete ECS Task Execution Role
+  `aws cloudformation describe-stacks --stack-name infra`
 
-  `aws iam delete-role --role-name ecsTaskExecutionRole`
-  
-- Delete ECS cluster
+  Deletion is successful if you get the error below
 
-  `aws ecs delete-cluster --cluster default`
+  `An error occurred (ValidationError) when calling the DescribeStacks operation: Stack with id infra does not exist` 
