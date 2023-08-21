@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    tier: frontend
+  name: nginx-test
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 8000
+    protocol: TCP
+    targetPort: 80
+  selector:
+    tier: frontend
